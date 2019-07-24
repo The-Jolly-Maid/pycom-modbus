@@ -1,30 +1,43 @@
-#!/usr/bin/env python
-#
-# Copyright (c) 2019, Pycom Limited.
-#
-# This software is licensed under the GNU GPL version 3 or any
-# later version, with permitted additional terms. For more information
-# see the Pycom Licence v1.0 document supplied with this file, or
-# available at https://www.pycom.io/opensource/licensing
-#
-import uModBus.functions as functions
-import uModBus.const as Const
+#Source: https://github.com/pycom/pycom-modbus/tree/master/uModbus (2018-07-16)
+#This file has been modified and differ from its source version.
+
+import uModBusFunctions as functions
+import uModBusConst as Const
 from machine import UART
 from machine import Pin
 import struct
 import time
 import machine
 
-class Serial:
+class uModBusSerial:
 
-    def __init__(self, uart_id, baudrate=9600, data_bits=8, stop_bits=1, parity=None, pins=None, ctrl_pin=None):
-        self._uart = UART(uart_id, baudrate=baudrate, bits=data_bits, parity=parity, \
-                          stop=stop_bits, timeout_chars=10, pins=pins)
+
+    def __init__(self, uart_id, baudrate=9600, data_bits=8, stop_bits=1, parity=None, xb3Type = "Cellular", ctrl_pin=None):
+        if xb3Type != "Cellular":
+            raise ValueError('This module currently only supports the xb3 cellular module')
+
+        self._uart = UART(1,baudrate=9600,bits=8,parity=None,stop=1,flow=0,timeout=0,timeout_char=0)
+
+    #     pinsLen=len(pins)
+    #     if pins==None or pinsLen<2 or pinsLen>4 or pinsLen==3:
+    #         raise ValueError('pins should contain pin names/numbers for: tx, rx, [rts, cts]')
+    #     tx=pins[0]
+    #     rx=pins[1]
+    #     if pinsLen==4:
+    #         rts=pins[2]
+    #         cts=pins[3]
+    #         self._uart = UART(uart_id, baudrate=baudrate, bits=data_bits, parity=parity, \
+    #                       stop=stop_bits, timeout_char=10, tx=tx, rx=rx, rts=rts, cts=cts)
+    #     else:
+    #         self._uart = UART(uart_id, baudrate=baudrate, bits=data_bits, parity=parity, \
+    #                         stop=stop_bits, timeout_char=10, tx=tx, rx=rx)
+    #     #self._uart = UART(uart_id, baudrate=baudrate, bits=data_bits, parity=parity, \
+    #     #                  stop=stop_bits, timeout_chars=10, pins=pins)
         if ctrl_pin is not None:
             self._ctrlPin = Pin(ctrl_pin, mode=Pin.OUT)
         else:
             self._ctrlPin = None
-        self.char_time_ms = (1000 * (data_bits + stop_bits + 2)) // baudrate
+        # self.char_time_ms = (1000 * (data_bits + stop_bits + 2)) // baudrate
 
     def _calculate_crc16(self, data):
         crc = 0xFFFF
@@ -36,7 +49,8 @@ class Serial:
 
     def _bytes_to_bool(self, byte_list):
         bool_list = []
-        for index, byte in enumerate(byte_list):
+        for byte in byte_list:  #remove enumerate it is not supported by xbee micropython
+        # for index, byte in enumerate(byte_list):
             bool_list.extend([bool(byte & (1 << n)) for n in range(8)])
 
         return bool_list
@@ -65,7 +79,8 @@ class Serial:
 
         for x in range(1, 40):
             if self._uart.any():
-                response.extend(self._uart.readall())
+                response.extend(self._uart.read())
+                #response.extend(self._uart.readall())
                 # variable length function codes may require multiple reads
                 if self._exit_read(response):
                     break
@@ -83,10 +98,10 @@ class Serial:
 
         # flush the Rx FIFO
         self._uart.read()
-        if self._ctrlPin:
+        if self._ctrlPin is not None:  #added for situation in which you are not using control pins
             self._ctrlPin(1)
         self._uart.write(serial_pdu)
-        if self._ctrlPin:
+        if self._ctrlPin is not None:  #to control for when control pins are not used
             while not self._uart.wait_tx_done(2):
                 machine.idle()
             time.sleep_ms(1 + self.char_time_ms)
@@ -181,3 +196,11 @@ class Serial:
                                                         starting_address, quantity=len(register_values))
 
         return operation_status
+
+    def close(self):
+        if self._uart == None:
+            return
+        try:
+            self._uart.deinit()
+        except Exception:
+            pass
